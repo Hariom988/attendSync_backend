@@ -7,7 +7,14 @@ const LOCK_MINUTES = 15;
 const INVALID_MESSAGE = 'Invalid email or password';
 const DUMMY_HASH = await bcrypt.hash('not-a-real-password', 12);
 
-export async function adminLogin(req, res) {
+const ACCOUNT_TABLES = new Map([
+  ['admin', 'admins'],
+  ['hr', 'hrs'],
+  ['employee', 'employees'],
+]);
+
+async function loginWithRole(role, req, res) {
+  const table = ACCOUNT_TABLES.get(role);
   const email = String(req.body?.email ?? '').trim().toLowerCase();
   const password = String(req.body?.password ?? '');
 
@@ -18,65 +25,84 @@ export async function adminLogin(req, res) {
   const [rows] = await pool.execute(
     `SELECT id, name, email, password_hash, role, is_active,
             (locked_until IS NOT NULL AND locked_until > NOW()) AS is_locked
-     FROM admins WHERE email = ?`,
+     FROM ${table} WHERE email = ?`,
     [email]
   );
-  const admin = rows[0];
+  const account = rows[0];
 
-  if (!admin) {
+  if (!account) {
     await bcrypt.compare(password, DUMMY_HASH);
     return res.status(401).json({ message: INVALID_MESSAGE });
   }
 
-  if (admin.is_locked) {
+  if (account.is_locked) {
     return res.status(429).json({ message: 'Too many failed attempts. Try again later.' });
   }
 
-  const passwordMatches = await bcrypt.compare(password, admin.password_hash);
+  const passwordMatches = await bcrypt.compare(password, account.password_hash);
 
   if (!passwordMatches) {
     await pool.execute(
-      `UPDATE admins
+      `UPDATE ${table}
        SET locked_until = IF(failed_login_attempts + 1 >= ${MAX_FAILED_ATTEMPTS},
                              DATE_ADD(NOW(), INTERVAL ${LOCK_MINUTES} MINUTE), locked_until),
            failed_login_attempts = IF(failed_login_attempts + 1 >= ${MAX_FAILED_ATTEMPTS},
                                       0, failed_login_attempts + 1)
        WHERE id = ?`,
-      [admin.id]
+      [account.id]
     );
     return res.status(401).json({ message: INVALID_MESSAGE });
   }
 
-  if (!admin.is_active) {
+  if (!account.is_active) {
     return res.status(403).json({ message: 'This account has been deactivated' });
   }
 
   await pool.execute(
-    'UPDATE admins SET failed_login_attempts = 0, locked_until = NULL, last_login = NOW() WHERE id = ?',
-    [admin.id]
+    `UPDATE ${table} SET failed_login_attempts = 0, locked_until = NULL, last_login = NOW() WHERE id = ?`,
+    [account.id]
   );
 
-  const token = signToken({ id: admin.id, role: admin.role });
+  const token = signToken({ id: account.id, role: account.role });
   res.cookie(COOKIE_NAME, token, cookieOptions());
 
   res.json({
-    user: { id: admin.id, name: admin.name, email: admin.email, role: admin.role },
+    user: { id: account.id, name: account.name, email: account.email, role: account.role },
   });
 }
+
+export function adminLogin(req, res) {
+  return loginWithRole('admin', req, res);
+}
+
+export function userLogin(req, res) {
+  const role = String(req.body?.role ?? '');
+  if (role !== 'hr' && role !== 'employee') {
+    return res.status(400).json({ message: 'Role must be either hr or employee' });
+  }
+  return loginWithRole(role, req, res);
+}
+
 export async function me(req, res) {
+  const table = ACCOUNT_TABLES.get(req.user.role);
+  if (!table) {
+    res.clearCookie(COOKIE_NAME, cookieOptions());
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
+
   const [rows] = await pool.execute(
-    'SELECT id, name, email, role, is_active FROM admins WHERE id = ?',
+    `SELECT id, name, email, role, is_active FROM ${table} WHERE id = ?`,
     [req.user.id]
   );
-  const admin = rows[0];
+  const account = rows[0];
 
-  if (!admin || !admin.is_active) {
+  if (!account || !account.is_active) {
     res.clearCookie(COOKIE_NAME, cookieOptions());
     return res.status(401).json({ message: 'Not authenticated' });
   }
 
   res.json({
-    user: { id: admin.id, name: admin.name, email: admin.email, role: admin.role },
+    user: { id: account.id, name: account.name, email: account.email, role: account.role },
   });
 }
 

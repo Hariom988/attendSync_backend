@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt';
 import pool from '../config/db.js';
-import { validateEmployeeInput } from '../utils/validators.js';
+import { validateEmployeeInput, validateAssignmentInput} from '../utils/validators.js';
 
 const SALT_ROUNDS = 12;
 
@@ -66,6 +66,37 @@ export async function getEmployee(req, res) {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id < 1) {
     return res.status(400).json({ message: 'Invalid id' });
+  }
+
+  const [rows] = await pool.execute(`${EMPLOYEE_SELECT} WHERE e.id = ?`, [id]);
+  if (rows.length === 0) {
+    return res.status(404).json({ message: 'Employee not found' });
+  }
+  res.json({ employee: rows[0] });
+}
+export async function updateAssignment(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) {
+    return res.status(400).json({ message: 'Invalid id' });
+  }
+
+  const { changes, errors } = validateAssignmentInput(req.body);
+  if (errors.length > 0) {
+    return res.status(400).json({ message: 'Validation failed', errors });
+  }
+
+  const assignments = Object.keys(changes).map((column) => `${column} = ?`).join(', ');
+
+  try {
+    await pool.execute(
+      `UPDATE employees SET ${assignments} WHERE id = ?`,
+      [...Object.values(changes), id]
+    );
+  } catch (error) {
+    if (error.code === 'ER_NO_REFERENCED_ROW_2') {
+      return res.status(400).json({ message: 'The selected department or shift does not exist' });
+    }
+    throw error;
   }
 
   const [rows] = await pool.execute(`${EMPLOYEE_SELECT} WHERE e.id = ?`, [id]);

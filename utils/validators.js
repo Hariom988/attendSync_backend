@@ -71,3 +71,19 @@ export function validateEmployeeInput(body) {
     errors,
   };
 }
+export function validateAssignmentInput(body) {
+  const errors = [];
+  const changes = {};
+
+  if (body && Object.hasOwn(body, 'department_id')) {
+    changes.department_id = optionalId(body.department_id, 'Department id', errors);
+  }
+  if (body && Object.hasOwn(body, 'shift_id')) {
+    changes.shift_id = optionalId(body.shift_id, 'Shift id', errors);
+  }
+  if (Object.keys(changes).length === 0) {
+    errors.push('Provide department_id and/or shift_id (use null to remove an assignment)');
+  }
+
+  return { changes, errors };
+}
