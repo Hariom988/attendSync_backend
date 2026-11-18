@@ -4,6 +4,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import pool from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
 const app = express();
 const PORT = process.env.PORT || 4501;
 
@@ -16,6 +17,7 @@ app.get('/api/health', async (req, res) => {
   res.json({ status: 'ok', database: 'connected' });
 });
 app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
 app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' });
 });
